@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -29,6 +30,7 @@ public class CoinServiceImpl implements CoinService {
     private static final String BASE_IMAGE = "https://www.cryptocompare.com";
 
     // ---------------- TOP 10 COINS ----------------
+    @Cacheable(value = "coinList", key = "#page")
     @Override
     public List<Bitcoin> getCoinList(int page) {
 
@@ -73,6 +75,7 @@ public class CoinServiceImpl implements CoinService {
     }
 
     // ---------------- MARKET CHART ----------------
+    @Cacheable(value="marketChart", key="#coin + '-' + #days")
     @Override
     public String getMarketChart(String coin, int days) {
         return restTemplate.getForObject(
@@ -125,22 +128,22 @@ public class CoinServiceImpl implements CoinService {
             throw new RuntimeException("Failed to fetch coin details", e);
         }
     }
-
     
-    
-    
+    @Cacheable("top50")
     @Override
     public String getTop50CoinsByMarketCapRank() {
         return restTemplate.getForObject(
                 "https://min-api.cryptocompare.com/data/top/mktcapfull?limit=50&tsym=USD", String.class);
     }
 
+    @Cacheable("trending")
     @Override
     public String getTradingCoins() {
         return restTemplate.getForObject(
                 "https://min-api.cryptocompare.com/data/top/totalvolfull?limit=10&tsym=USD", String.class);
     }
 
+    @Cacheable(value="search", key="#keyword")
     @Override
     public String searchCoin(String keyword) {
         return restTemplate.getForObject(
