@@ -74,14 +74,6 @@ public class CoinController {
 		return new ResponseEntity<>(jsonNode,HttpStatus.ACCEPTED);
 	}
 	
-//	@GetMapping("/details/{coinId}")
-//	ResponseEntity<JsonNode> getCoinDetails(@PathVariable String coinId) throws JsonMappingException, JsonProcessingException{
-//		String response = coinService.getcoinDetails(coinId);
-//		JsonNode jsonNode = objectMapper.readTree(response);
-//		
-//		return new ResponseEntity<>(jsonNode,HttpStatus.OK);
-//	}
-	
 	@GetMapping("/details/{coinId}")
 	public ResponseEntity<Bitcoin> getCoinDetails(@PathVariable String coinId) {
 	    return ResponseEntity.ok(coinService.getcoinDetails(coinId));

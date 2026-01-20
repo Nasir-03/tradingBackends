@@ -16,32 +16,6 @@ package com.trade.controller;
 //import com.trade.service.ChatbotService;
 //import com.trade.service.ChatbotServiceImpl;
 
-//@RestController
-//@RequestMapping("/chatbot")
-//public class ChatBotController {
-//	
-//	private final ChatbotService chatbotService;
-//	
-//	@Autowired
-//	private ChatbotServiceImpl chatbotServiceImpl;
-//
-//	public ChatBotController(ChatbotService chatbotService) {
-//		this.chatbotService = chatbotService;
-//	}
-//	
-//	@PostMapping("/ask")
-//    public ApiResponse ask(@RequestBody Map<String,String> body){
-//        return chatbotServiceImpl.ask(body.get("question"));
-//    }
-
-
-
-
-
-//package com.trade.controller;
-
-import java.util.Map;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -70,50 +44,14 @@ public class ChatBotController {
 		this.chatbotService = chatbotService;
 	}
 
-//    private final ChatbotServiceImpl ai;
-//
-//    @Autowired
-//    public ChatBotController(ChatbotServiceImpl ai) {
-//        this.ai = ai;
-//    }
-//
-//    @PostMapping("/ask")
-//    public ApiResponse ask(@RequestBody Map<String,String> body) {
-//        return ai.smartAsk(body.get("question"));
-//    }
-//}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	@PostMapping("/details")
-	public ResponseEntity<ApiResponse> getCoinDetails(@RequestBody PropmpBody prompt){		
-		chatbotService.getCoinDetails(prompt.getPrompt());
-		
-		ApiResponse response = new ApiResponse();
-		response.setMessage(prompt.getPrompt());
-		
-		return new ResponseEntity<>(response,HttpStatus.OK);
+	public ResponseEntity<ApiResponse> getCoinDetails(@RequestBody PropmpBody prompt){
+	    return ResponseEntity.ok(
+	        chatbotService.getCoinDetails(prompt.getPrompt())
+	    );
 	}
-	
-//	@PostMapping("/details")
-//	public ResponseEntity<ApiResponse> getCoinDetails(@RequestBody PropmpBody body){
-//	    return ResponseEntity.ok(chatbotService.getCoinDetails(body.getPrompt()));
-//	}
+
+
 	
 	@PostMapping("/simple")
 	public ResponseEntity<String> simpleChatHandler(@RequestBody PropmpBody body){
