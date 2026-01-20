@@ -1,7 +1,5 @@
 package com.trade.controller;
 
-import java.nio.file.WatchService;
-import com.trade.service.WatchListServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,17 +33,25 @@ public class WatchListController {
 		this.coinService = coinService;
 		
 	}
-	
+
+
 	@GetMapping("/user")
 	public ResponseEntity<WatchList> getUserWatchList(
-			@RequestHeader("Authorization")String jwt
-			) throws Exception{
-		User user = userService.getUserByJwt(jwt);
-		
-		WatchList watchList = watchListService.findById(user.getId());
-		
-		return new ResponseEntity<>(watchList,HttpStatus.OK);
+	        @RequestHeader("Authorization") String jwt
+	) throws Exception {
+
+	    String token = jwt.startsWith("Bearer ")
+	            ? jwt.substring(7)
+	            : jwt;
+
+	    User user = userService.getUserByJwt(token);
+
+	    WatchList watchList =
+	            watchListService.findUserWatchList(user.getId());   // ✅ CORRECT
+
+	    return new ResponseEntity<>(watchList, HttpStatus.OK);
 	}
+
 	
 	@PostMapping("/create/{watchlistId}")
 	public ResponseEntity<WatchList> createWatchList(
@@ -59,15 +65,22 @@ public class WatchListController {
 	
 	@PatchMapping("/add/coin/{coinId}")
 	public ResponseEntity<Bitcoin> addItemToWatchlist(
-			@RequestHeader("Authorization")String jwt,
-			@PathVariable String coinId
-			) throws Exception{
-		User user = userService.getUserByJwt(jwt);
+	        @RequestHeader("Authorization") String jwt,
+	        @PathVariable String coinId
+	) throws Exception {
 
-		Bitcoin coin = coinService.findById(coinId);
-		
-		Bitcoin addCoin = watchListService.addItemToWatchList(coin, user);
-       
-		return ResponseEntity.ok(addCoin);
+	    // ✅ STRIP BEARER PREFIX
+	    String token = jwt.startsWith("Bearer ")
+	            ? jwt.substring(7)
+	            : jwt;
+
+	    User user = userService.getUserByJwt(token);
+
+	    Bitcoin coin = coinService.findById(coinId);
+
+	    Bitcoin addCoin =
+	            watchListService.addItemToWatchList(coin, user);
+
+	   return ResponseEntity.ok(addCoin);
 	}
 }

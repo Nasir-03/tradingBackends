@@ -6,11 +6,13 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import com.trade.extra.ApiResponse;
@@ -25,6 +27,9 @@ public class ChatbotServiceImpl implements ChatbotService{
   
   @Value("${GROQ_API_KEY}")
   String GROQ_API_KEY;
+  
+  @Value("${CRYPTOCOMPARE_KEY}")
+  private String cryptoCompareKey;
 
     private static final Map<String,String> FIELD_MAP = Map.of(
     	    "current_price","currentPrice",
@@ -48,22 +53,35 @@ public class ChatbotServiceImpl implements ChatbotService{
         return Double.parseDouble(value.toString());
     }
 
-    
+    private CoinDTO fetchFromCoinGecko(String coinId){
 
-    // 🔥 Get full market data    
-    public CoinDTO makeApiRequest(String coinId){
+        if(coinId == null || coinId.isBlank())
+            coinId = "bitcoin";
 
-        String url="https://api.coingecko.com/api/v3/coins/"+coinId;
-        Map<String,Object> res=restTemplate.getForObject(url,Map.class);
-        Map<String,Object> market=(Map<String,Object>)res.get("market_data");
-        Map<String,Object> image=(Map<String,Object>)res.get("image");
-
-        CoinDTO dto=new CoinDTO();
         coinId = coinId.toLowerCase().trim();
+
+        String url="https://api.coingecko.com/api/v3/coins/" + coinId;
+
+        Map<String,Object> res = restTemplate.getForObject(url, Map.class);
+
+        Map<String,Object> market = (Map<String,Object>)res.get("market_data");
+
+        if(market == null)
+            throw new RuntimeException("CoinGecko returned no market data for " + coinId);
+
+        Map<String,Object> image = (Map<String,Object>)res.get("image");
+
+        CoinDTO dto = new CoinDTO();
+
         dto.setId((String)res.get("id"));
         dto.setName((String)res.get("name"));
         dto.setSymbol((String)res.get("symbol"));
-        dto.setImage(image.get("large").toString());
+
+        dto.setImage(
+            image != null && image.get("large") != null
+                ? image.get("large").toString()
+                : ""
+        );
 
         dto.setCurrentPrice(toDouble(((Map<?,?>)market.get("current_price")).get("usd")));
         dto.setMarketCap(toDouble(((Map<?,?>)market.get("market_cap")).get("usd")));
@@ -71,31 +89,173 @@ public class ChatbotServiceImpl implements ChatbotService{
         dto.setTotalVolume(toDouble(((Map<?,?>)market.get("total_volume")).get("usd")));
         dto.setHigh24h(toDouble(((Map<?,?>)market.get("high_24h")).get("usd")));
         dto.setLow24h(toDouble(((Map<?,?>)market.get("low_24h")).get("usd")));
+
         dto.setPriceChange24h(toDouble(market.get("price_change_24h")));
         dto.setPriceChangePercentage24h(toDouble(market.get("price_change_percentage_24h")));
+
         dto.setCirculatingSupply(toDouble(market.get("circulating_supply")));
         dto.setTotalSupply(toDouble(market.get("total_supply")));
 
         return dto;
     }
+
+    
+    private CoinDTO fetchFromCryptoCompare(String coinId){
+
+    	  String symbol = coinId.toUpperCase();
+
+    	  String url =
+    	  "https://min-api.cryptocompare.com/data/pricemultifull?fsyms="
+    	  + symbol + "&tsyms=USD&api_key=" + cryptoCompareKey;
+
+    	  Map<String,Object> res =
+    	      restTemplate.getForObject(url, Map.class);
+
+    	  Map usd =
+    	      (Map)((Map)((Map)res.get("RAW")).get(symbol)).get("USD");
+
+    	  CoinDTO dto = new CoinDTO();
+
+    	  dto.setId(symbol);
+    	  dto.setName(symbol);
+    	  dto.setSymbol(symbol);
+
+    	  dto.setCurrentPrice(toDouble(usd.get("PRICE")));
+    	  dto.setMarketCap(toDouble(usd.get("MKTCAP")));
+    	  dto.setTotalVolume(toDouble(usd.get("VOLUME24HOUR")));
+    	  dto.setPriceChange24h(toDouble(usd.get("CHANGE24HOUR")));
+    	  dto.setPriceChangePercentage24h(
+    	      toDouble(usd.get("CHANGEPCT24HOUR"))
+    	  );
+
+    	  return dto;
+    	}
+
+    
+
+    // 🔥 Get full market data  
+//    @Cacheable(value = "coingecko", key = "#coinId", unless = "#result == null")
+//    public CoinDTO makeApiRequest(String coinId){
+//
+//    	try {
+//    	      return fetchFromCoinGecko(coinId);
+//    	  } 
+//    	  catch(HttpClientErrorException.TooManyRequests e) {
+//    	      // 🔥 FALLBACK
+//    	      return fetchFromCryptoCompare(coinId);
+//    	  }
+//    	  catch(Exception e) {
+//    	      return fetchFromCryptoCompare(coinId);
+//    	  }
+//    	
+//    	if(coinId == null || coinId.isBlank())
+//            coinId = "bitcoin";
+//
+//        coinId = coinId.toLowerCase().trim();
+//
+//        String url="https://api.coingecko.com/api/v3/coins/" + coinId;
+//        
+//        Map<String,Object> res=restTemplate.getForObject(url,Map.class);
+//        Map<String,Object> market=(Map<String,Object>)res.get("market_data");
+//        
+//        if(market == null)
+//            throw new RuntimeException("CoinGecko returned no market data for " + coinId);
+//
+//        
+//        Map<String,Object> image=(Map<String,Object>)res.get("image");
+//
+//        CoinDTO dto=new CoinDTO();
+//        coinId = coinId.toLowerCase().trim();
+//        dto.setId((String)res.get("id"));
+//        dto.setName((String)res.get("name"));
+//        dto.setSymbol((String)res.get("symbol"));
+//        dto.setImage(
+//        	    image != null && image.get("large") != null
+//        	        ? image.get("large").toString()
+//        	        : ""
+//        	);
+//
+//        dto.setCurrentPrice(toDouble(((Map<?,?>)market.get("current_price")).get("usd")));
+//        dto.setMarketCap(toDouble(((Map<?,?>)market.get("market_cap")).get("usd")));
+//        dto.setMarketCapRank(toDouble(res.get("market_cap_rank")));
+//        dto.setTotalVolume(toDouble(((Map<?,?>)market.get("total_volume")).get("usd")));
+//        dto.setHigh24h(toDouble(((Map<?,?>)market.get("high_24h")).get("usd")));
+//        dto.setLow24h(toDouble(((Map<?,?>)market.get("low_24h")).get("usd")));
+//        dto.setPriceChange24h(toDouble(market.get("price_change_24h")));
+//        dto.setPriceChangePercentage24h(toDouble(market.get("price_change_percentage_24h")));
+//        dto.setCirculatingSupply(toDouble(market.get("circulating_supply")));
+//        dto.setTotalSupply(toDouble(market.get("total_supply")));
+//
+//        return dto;
+//    }
+    
+    @Cacheable(value = "coingecko", key = "#coinId", unless = "#result == null")
+    public CoinDTO makeApiRequest(String coinId){
+
+        try {
+            return fetchFromCoinGecko(coinId);
+        } 
+        catch(HttpClientErrorException.TooManyRequests e) {
+            // 🔥 RATE LIMIT → FALLBACK
+            return fetchFromCryptoCompare(coinId);
+        }
+        catch(Exception e) {
+            return fetchFromCryptoCompare(coinId);
+        }
+    }
+
+    
    
+//    @Override
+//    public ApiResponse getCoinDetails(String prompt){
+////        FunctionResponse fr=getFunctionResponse(prompt);
+//        
+//        FunctionResponse fr = getFunctionResponse(prompt);
+//        fr.setCurrenctData(fixAmbiguousField(prompt, fr.getCurrenctData()));
+//
+//        
+//        CoinDTO dto=makeApiRequest(fr.getCurrencyName());
+//        Object val=getFieldValue(dto,fr.getCurrenctData());
+//
+//        ApiResponse res=new ApiResponse();
+//        res.setMessage(fr.getCurrenctData()+" of "+fr.getCurrencyName());
+////        res.setData(val);
+//        res.setData(generateHumanResponse(fr.getCurrencyName(), fr.getCurrenctData(), val));
+//
+//        return res;
+//    }
+
     @Override
     public ApiResponse getCoinDetails(String prompt){
-//        FunctionResponse fr=getFunctionResponse(prompt);
-        
-        FunctionResponse fr = getFunctionResponse(prompt);
-        fr.setCurrenctData(fixAmbiguousField(prompt, fr.getCurrenctData()));
 
-        
-        CoinDTO dto=makeApiRequest(fr.getCurrencyName());
-        Object val=getFieldValue(dto,fr.getCurrenctData());
+      try {
 
-        ApiResponse res=new ApiResponse();
-        res.setMessage(fr.getCurrenctData()+" of "+fr.getCurrencyName());
-//        res.setData(val);
-        res.setData(generateHumanResponse(fr.getCurrencyName(), fr.getCurrenctData(), val));
+         FunctionResponse fr = getFunctionResponse(prompt);
 
-        return res;
+         CoinDTO dto = makeApiRequest(fr.getCurrencyName());
+
+         Object val = getFieldValue(dto, fr.getCurrenctData());
+
+         ApiResponse res = new ApiResponse();
+         res.setData(
+           generateHumanResponse(
+             fr.getCurrencyName(),
+             fr.getCurrenctData(),
+             val
+           )
+         );
+
+         return res;
+
+      } catch(Exception e){
+
+         ApiResponse res = new ApiResponse();
+
+         res.setMessage("Service busy. Using backup data.");
+         res.setData("Try again in few seconds");
+
+         return res;
+      }
     }
 
     
@@ -177,6 +337,36 @@ public class ChatbotServiceImpl implements ChatbotService{
 
 
     
+//    public FunctionResponse getFunctionResponse(String prompt){
+//
+//        String url="https://api.groq.com/openai/v1/chat/completions";
+//
+//        HttpHeaders headers=new HttpHeaders();
+//        headers.setContentType(MediaType.APPLICATION_JSON);
+//        headers.setBearerAuth(GROQ_API_KEY);
+//
+//        JSONArray messages=new JSONArray();
+//        messages.put(new JSONObject().put("role","system")
+//            .put("content","Only call function getCoinDetails."));
+//        messages.put(new JSONObject().put("role","user").put("content",prompt));
+//
+//        JSONObject body=new JSONObject();
+//        body.put("model","llama-3.1-8b-instant");
+//        body.put("messages",messages);
+////        body.put("tools",new JSONArray().put(getGroqToolDefinition()));
+//       
+//        body.put("tools", new JSONArray()
+//        	    .put(getGroqToolDefinition())
+//        	    .put(getTopCoinsTool())
+//        	);
+//
+//        body.put("tool_choice","auto");
+//
+//        String res=new RestTemplate().postForObject(url,new HttpEntity<>(body.toString(),headers),String.class);
+//
+//        return parseGroqFunctionResponse(res);
+//    }
+
     public FunctionResponse getFunctionResponse(String prompt){
 
         String url="https://api.groq.com/openai/v1/chat/completions";
@@ -186,41 +376,91 @@ public class ChatbotServiceImpl implements ChatbotService{
         headers.setBearerAuth(GROQ_API_KEY);
 
         JSONArray messages=new JSONArray();
+
+        // ✅ Better system prompt
         messages.put(new JSONObject().put("role","system")
-            .put("content","Only call function getCoinDetails."));
+            .put("content",
+            "You are crypto assistant. " +
+            "Use getCoinDetails ONLY when user asks about a coin metric. " +
+            "Otherwise respond normally."));
+
         messages.put(new JSONObject().put("role","user").put("content",prompt));
 
         JSONObject body=new JSONObject();
         body.put("model","llama-3.1-8b-instant");
         body.put("messages",messages);
-//        body.put("tools",new JSONArray().put(getGroqToolDefinition()));
-       
-        body.put("tools", new JSONArray()
-        	    .put(getGroqToolDefinition())
-        	    .put(getTopCoinsTool())
-        	);
+
+        // ✅ ONLY ONE TOOL TO AVOID CONFLICT
+        body.put("tools", new JSONArray().put(getGroqToolDefinition()));
 
         body.put("tool_choice","auto");
 
-        String res=new RestTemplate().postForObject(url,new HttpEntity<>(body.toString(),headers),String.class);
+        String res = new RestTemplate()
+            .postForObject(url,new HttpEntity<>(body.toString(),headers),String.class);
 
-        return parseGroqFunctionResponse(res);
+        return safeParseGroqResponse(res, prompt);
     }
+
     
-    private FunctionResponse parseGroqFunctionResponse(String res){
-        JSONObject msg=new JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message");
+    private FunctionResponse safeParseGroqResponse(String res, String prompt){
 
-        if(!msg.has("tool_calls")) throw new RuntimeException("AI did not return function call");
+        JSONObject msg = new JSONObject(res)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message");
 
-        JSONObject call=msg.getJSONArray("tool_calls").getJSONObject(0).getJSONObject("function");
-        JSONObject args=new JSONObject(call.getString("arguments"));
+        // ✅ If no tool call → fallback using keyword extraction
+        if(!msg.has("tool_calls")){
 
-        FunctionResponse fr=new FunctionResponse();
+            FunctionResponse fr = new FunctionResponse();
+
+            // Basic heuristic
+            fr.setCurrencyName(extractCoinName(prompt));
+            fr.setCurrenctData(fixAmbiguousField(prompt, "current_price"));
+
+            return fr;
+        }
+
+        JSONObject call = msg.getJSONArray("tool_calls")
+                            .getJSONObject(0)
+                            .getJSONObject("function");
+
+        JSONObject args = new JSONObject(call.getString("arguments"));
+
+        FunctionResponse fr = new FunctionResponse();
         fr.setFunctionName(call.getString("name"));
         fr.setCurrencyName(args.getString("currencyName"));
         fr.setCurrenctData(args.getString("currencyData"));
+
         return fr;
     }
+
+    private String extractCoinName(String prompt){
+
+        prompt = prompt.toLowerCase();
+
+        if(prompt.contains("bitcoin")) return "bitcoin";
+        if(prompt.contains("ethereum")) return "ethereum";
+        if(prompt.contains("solana")) return "solana";
+        if(prompt.contains("dogecoin")) return "dogecoin";
+
+        return "bitcoin"; // default safe
+    }
+
+//    private FunctionResponse parseGroqFunctionResponse(String res){
+//        JSONObject msg=new JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message");
+//
+//        if(!msg.has("tool_calls")) throw new RuntimeException("AI did not return function call");
+//
+//        JSONObject call=msg.getJSONArray("tool_calls").getJSONObject(0).getJSONObject("function");
+//        JSONObject args=new JSONObject(call.getString("arguments"));
+//
+//        FunctionResponse fr=new FunctionResponse();
+//        fr.setFunctionName(call.getString("name"));
+//        fr.setCurrencyName(args.getString("currencyName"));
+//        fr.setCurrenctData(args.getString("currencyData"));
+//        return fr;
+//    }
 
 
     private String generateHumanResponse(String coin, String field, Object value) {
@@ -249,9 +489,16 @@ public class ChatbotServiceImpl implements ChatbotService{
 
         String res = restTemplate.postForObject(url, new HttpEntity<>(body.toString(),h), String.class);
 
-        return new JSONObject(res)
-            .getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message").getString("content");
+        try {
+            return new JSONObject(res)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content");
+        } catch(Exception e) {
+            return coin + " " + field + " is " + value;
+        }
+
     }
 
     
@@ -276,6 +523,31 @@ public class ChatbotServiceImpl implements ChatbotService{
         return res;
     }
 
+//    private String detectIntent(String prompt) {
+//
+//        String url = "https://api.groq.com/openai/v1/chat/completions";
+//
+//        HttpHeaders h = new HttpHeaders();
+//        h.setContentType(MediaType.APPLICATION_JSON);
+//        h.setBearerAuth(GROQ_API_KEY);
+//
+//        JSONObject body = new JSONObject()
+//            .put("model","llama-3.1-8b-instant")
+//            .put("temperature",0)
+//            .put("messages", new JSONArray()
+//                .put(new JSONObject().put("role","system")
+//                    .put("content","You are a classifier. Respond ONLY in JSON: {\"intent\":\"CRYPTO\"} or {\"intent\":\"GENERAL\"}"))
+//                .put(new JSONObject().put("role","user").put("content",prompt))
+//            );
+//
+//        String res = restTemplate.postForObject(url,new HttpEntity<>(body.toString(),h),String.class);
+//
+//        return new JSONObject(res)
+//            .getJSONArray("choices").getJSONObject(0)
+//            .getJSONObject("message")
+//            .getString("content");
+//    }
+
     private String detectIntent(String prompt) {
 
         String url = "https://api.groq.com/openai/v1/chat/completions";
@@ -289,16 +561,25 @@ public class ChatbotServiceImpl implements ChatbotService{
             .put("temperature",0)
             .put("messages", new JSONArray()
                 .put(new JSONObject().put("role","system")
-                    .put("content","You are a classifier. Respond ONLY in JSON: {\"intent\":\"CRYPTO\"} or {\"intent\":\"GENERAL\"}"))
+                    .put("content",
+                    "You are a classifier. Respond ONLY in JSON: " +
+                    "{\"intent\":\"CRYPTO\"} or {\"intent\":\"GENERAL\"}"))
                 .put(new JSONObject().put("role","user").put("content",prompt))
             );
 
-        String res = restTemplate.postForObject(url,new HttpEntity<>(body.toString(),h),String.class);
+        try {
+            String res = restTemplate.postForObject(
+                url,new HttpEntity<>(body.toString(),h),String.class);
 
-        return new JSONObject(res)
-            .getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content");
+            return new JSONObject(res)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content");
+
+        } catch(Exception e) {
+            return "{\"intent\":\"GENERAL\"}";
+        }
     }
 
 
@@ -346,12 +627,9 @@ public class ChatbotServiceImpl implements ChatbotService{
           );
     }
 
-
-
 	@Override
 	public ApiResponse ask(String q) {
-		// TODO Auto-generated method stub
-		return null;
+		return smartAsk(q);
 	}
   
 }

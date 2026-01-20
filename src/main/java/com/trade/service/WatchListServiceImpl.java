@@ -26,16 +26,29 @@ public class WatchListServiceImpl implements WatchListService{
 		this.sequenceGeneratorService = sequenceGeneratorService;
 	}
 
+	
 	@Override
 	public WatchList findUserWatchList(Long userId) {
-		WatchList watchList = watchListRepository.findByUserId(userId);
-		
-		if (watchList==null) {
-			throw new RuntimeException("Watchlist not found");
-		}
-		
-		return watchList;
+
+	    WatchList watchList = watchListRepository.findByUserId(userId);
+
+	    if (watchList == null) {
+	        // create empty watchlist WITHOUT userService
+	        WatchList newList = new WatchList();
+	        newList.setId(sequenceGeneratorService.generateSequence("watchlist_sequence"));
+
+	        User u = new User();
+	        u.setId(userId);
+
+	        newList.setUser(u);
+
+	        return watchListRepository.save(newList);
+	    }
+
+	    return watchList;
 	}
+
+
 
 	@Override
 	public WatchList createWatchList(User user) {
@@ -58,20 +71,21 @@ public class WatchListServiceImpl implements WatchListService{
 
 	@Override
 	public Bitcoin addItemToWatchList(Bitcoin coin, User user) {
-		WatchList watchList = findUserWatchList(user.getId());
-		
-		if (watchList.getCoins().contains(coin)) {
-			watchList.getCoins().remove(coin);
-		}else {
-			watchList.getCoins().add(coin);
-		}
-		watchListRepository.save(watchList);
-		
-		return coin;
+
+	    WatchList watchList = watchListRepository.findByUserId(user.getId());
+
+	    if (watchList == null) {
+	        watchList = createWatchList(user);
+	    }
+
+	    if (watchList.getCoins().contains(coin)) {
+	        watchList.getCoins().remove(coin);
+	    } else {
+	        watchList.getCoins().add(coin);
+	    }
+
+	    watchListRepository.save(watchList);
+
+	    return coin;
 	}
-
-
-
-	
-
 }
