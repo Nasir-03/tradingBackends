@@ -102,54 +102,141 @@ public class ChatbotServiceImpl implements ChatbotService{
     
     private CoinDTO fetchFromCryptoCompare(String coinId){
 
-    	  String symbol = coinId.toUpperCase();
+        try {
 
-    	  String url =
-    	  "https://min-api.cryptocompare.com/data/pricemultifull?fsyms="
-    	  + symbol + "&tsyms=USD&api_key=" + cryptoCompareKey;
+            String symbol = coinId.toUpperCase();
 
-    	  Map<String,Object> res =
-    	      restTemplate.getForObject(url, Map.class);
+            String url =
+            "https://min-api.cryptocompare.com/data/pricemultifull?fsyms="
+            + symbol + "&tsyms=USD&api_key=" + cryptoCompareKey;
 
-    	  Map usd =
-    	      (Map)((Map)((Map)res.get("RAW")).get(symbol)).get("USD");
+            Map<String,Object> res =
+                restTemplate.getForObject(url, Map.class);
 
-    	  CoinDTO dto = new CoinDTO();
+            // 🔐 SAFE CHECKS
+            if(res == null || res.get("RAW") == null){
+                throw new RuntimeException("No RAW data from CryptoCompare");
+            }
 
-    	  dto.setId(symbol);
-    	  dto.setName(symbol);
-    	  dto.setSymbol(symbol);
+            Map raw = (Map) res.get("RAW");
 
-    	  dto.setCurrentPrice(toDouble(usd.get("PRICE")));
-    	  dto.setMarketCap(toDouble(usd.get("MKTCAP")));
-    	  dto.setTotalVolume(toDouble(usd.get("VOLUME24HOUR")));
-    	  dto.setPriceChange24h(toDouble(usd.get("CHANGE24HOUR")));
-    	  dto.setPriceChangePercentage24h(
-    	      toDouble(usd.get("CHANGEPCT24HOUR"))
-    	  );
+            if(raw.get(symbol) == null){
+                throw new RuntimeException("Symbol not found: " + symbol);
+            }
 
-    	  return dto;
-    	}
+            Map usd = (Map)((Map)raw.get(symbol)).get("USD");
 
-    
+            if(usd == null){
+                throw new RuntimeException("USD data missing for: " + symbol);
+            }
+
+            CoinDTO dto = new CoinDTO();
+
+            dto.setId(symbol);
+            dto.setName(symbol);
+            dto.setSymbol(symbol);
+
+            dto.setCurrentPrice(toDouble(usd.get("PRICE")));
+            dto.setMarketCap(toDouble(usd.get("MKTCAP")));
+            dto.setTotalVolume(toDouble(usd.get("VOLUME24HOUR")));
+            dto.setPriceChange24h(toDouble(usd.get("CHANGE24HOUR")));
+            dto.setPriceChangePercentage24h(
+                toDouble(usd.get("CHANGEPCT24HOUR"))
+            );
+
+            return dto;
+
+        } catch(Exception e){
+
+            // 🔥 HARD FALLBACK – NEVER NULL
+            CoinDTO dto = new CoinDTO();
+            dto.setId("bitcoin");
+            dto.setName("Bitcoin");
+            dto.setSymbol("BTC");
+            dto.setCurrentPrice(0);
+
+            return dto;
+        }
+    }
+
 
        
+//    @Cacheable(value = "coingecko", key = "#coinId", unless = "#result == null")
+//    public CoinDTO makeApiRequest(String coinId){
+//
+//        try {
+//            return fetchFromCoinGecko(coinId);
+//        } 
+//        catch(HttpClientErrorException.TooManyRequests e) {
+//            // 🔥 RATE LIMIT → FALLBACK
+//            return fetchFromCryptoCompare(coinId);
+//        }
+//        catch(Exception e) {
+//            return fetchFromCryptoCompare(coinId);
+//        }
+//    }
+    
     @Cacheable(value = "coingecko", key = "#coinId", unless = "#result == null")
     public CoinDTO makeApiRequest(String coinId){
 
         try {
             return fetchFromCoinGecko(coinId);
         } 
-        catch(HttpClientErrorException.TooManyRequests e) {
-            // 🔥 RATE LIMIT → FALLBACK
-            return fetchFromCryptoCompare(coinId);
-        }
         catch(Exception e) {
-            return fetchFromCryptoCompare(coinId);
+
+            try {
+                return fetchFromCryptoCompare(coinId);
+            } catch(Exception ex) {
+
+                // FINAL SAFE OBJECT
+                CoinDTO dto = new CoinDTO();
+                dto.setId("bitcoin");
+                dto.setName("Bitcoin");
+                dto.setSymbol("BTC");
+                dto.setCurrentPrice(0);
+                return dto;
+            }
         }
     }
 
+
    
+//    @Override
+//    public ApiResponse getCoinDetails(String prompt){
+//
+//      try {
+//
+//         FunctionResponse fr = getFunctionResponse(prompt);
+//
+//         CoinDTO dto = makeApiRequest(fr.getCurrencyName());
+//
+//         Object val = getFieldValue(dto, fr.getCurrenctData());
+//
+//         ApiResponse res = new ApiResponse();
+//
+//         // ❗ NO GROQ HERE
+//         res.setData(
+//           fr.getCurrencyName() + " " +
+//           fr.getCurrenctData() + " is " +
+//           val
+//         );
+//
+//         return res;
+//
+//      } catch(Exception e){
+//
+//         e.printStackTrace();   // IMPORTANT
+//
+//         ApiResponse res = new ApiResponse();
+//
+//         res.setMessage("Service busy. Using backup data.");
+//         res.setData("Try again in few seconds");
+//
+//         return res;
+//      }
+//    }
+    
+    
     @Override
     public ApiResponse getCoinDetails(String prompt){
 
@@ -163,7 +250,6 @@ public class ChatbotServiceImpl implements ChatbotService{
 
          ApiResponse res = new ApiResponse();
 
-         // ❗ NO GROQ HERE
          res.setData(
            fr.getCurrencyName() + " " +
            fr.getCurrenctData() + " is " +
@@ -174,7 +260,7 @@ public class ChatbotServiceImpl implements ChatbotService{
 
       } catch(Exception e){
 
-         e.printStackTrace();   // IMPORTANT
+         e.printStackTrace();
 
          ApiResponse res = new ApiResponse();
 
@@ -184,6 +270,7 @@ public class ChatbotServiceImpl implements ChatbotService{
          return res;
       }
     }
+
 
     
     private Object getFieldValue(CoinDTO dto,String field){
@@ -356,17 +443,38 @@ public class ChatbotServiceImpl implements ChatbotService{
         return fr;
     }
 
+//    private String extractCoinName(String prompt){
+//
+//        prompt = prompt.toLowerCase();
+//
+//        if(prompt.contains("bitcoin")) return "bitcoin";
+//        if(prompt.contains("ethereum")) return "ethereum";
+//        if(prompt.contains("solana")) return "solana";
+//        if(prompt.contains("dogecoin")) return "dogecoin";
+//
+//        return "bitcoin"; // default safe
+//    }
+    
+    
     private String extractCoinName(String prompt){
 
         prompt = prompt.toLowerCase();
 
+        if(prompt.contains("btc")) return "bitcoin";
         if(prompt.contains("bitcoin")) return "bitcoin";
+
+        if(prompt.contains("eth")) return "ethereum";
         if(prompt.contains("ethereum")) return "ethereum";
+
+        if(prompt.contains("sol")) return "solana";
         if(prompt.contains("solana")) return "solana";
+
+        if(prompt.contains("doge")) return "dogecoin";
         if(prompt.contains("dogecoin")) return "dogecoin";
 
         return "bitcoin"; // default safe
     }
+
 
     
     public ApiResponse smartAsk(String prompt) {
