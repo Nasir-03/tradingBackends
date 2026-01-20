@@ -66,30 +66,32 @@ package com.trade.controller;
 
 
 
-import java.util.Map;
-
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import com.trade.extra.ApiResponse;
+import com.trade.extra.PropmpBody;
 import com.trade.service.ChatbotService;
 
 @RestController
 @RequestMapping("/chatbot")
 public class ChatBotController {
 
-    private ChatbotService chatbotService;
-    
+    private final ChatbotService chatbotService;
 
+    @Autowired
     public ChatBotController(ChatbotService chatbotService) {
-		super();
-		this.chatbotService = chatbotService;
-	}
+        this.chatbotService = chatbotService;
+    }
 
-
-	@PostMapping("/ask")
-    public ResponseEntity<ApiResponse> ask(@RequestBody Map<String,String> body){
-        String prompt = body.get("prompt");
-        return ResponseEntity.ok(chatbotService.ask(prompt));
+    @PostMapping("/ask")
+    public ResponseEntity<ApiResponse> ask(@RequestBody PropmpBody body){
+        return ResponseEntity.ok(
+            chatbotService.ask(body.getPrompt())
+        );
     }
 }

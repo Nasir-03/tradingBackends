@@ -1,4 +1,4 @@
-//package com.trade.service;
+package com.trade.service;
 //import java.lang.reflect.Field;
 //import java.util.List;
 //import java.util.Map;
@@ -574,34 +574,16 @@
 //  
 //}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.trade.service;
-
+import java.util.HashMap;
 import java.util.Map;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -613,78 +595,149 @@ public class ChatbotServiceImpl implements ChatbotService {
 
     private final RestTemplate rest = new RestTemplate();
 
+    @Value("${GROQ_API_KEY}")
+    private String groqKey;
+
     @Value("${CRYPTOCOMPARE_KEY}")
     private String cryptoKey;
 
-    // ======================================
+    // ==========================================
     // ENTRY POINT
-    // ======================================
+    // ==========================================
     @Override
     public ApiResponse ask(String prompt){
 
-        String coin = detectCoin(prompt);
-        String field = detectField(prompt);
+        try {
 
-        CoinDTO dto = fetchCoin(coin);
+            // 1. AI Understand Question
+            Map<String,String> intent =
+                understandQuestion(prompt);
 
-        Object value = readValue(dto, field);
+            String coin  = intent.get("coin");
+            String field = intent.get("field");
 
-        ApiResponse res = new ApiResponse();
-        res.setData(coin + " " + field + " is " + value);
+            // 2. Fetch Market Data
+            CoinDTO dto = fetchCoin(coin);
 
-        return res;
+            if(dto == null){
+                return error(
+                  "Sorry, I couldn’t find data for coin: "
+                  + coin.toUpperCase()
+                );
+            }
+
+            Object value = readValue(dto, field);
+
+            // 3. Human Response via AI
+            String human =
+              makeHumanResponse(coin, field, value);
+
+            ApiResponse res = new ApiResponse();
+            res.setData(human);
+
+            return res;
+
+        } catch(Exception e){
+
+            ApiResponse r = new ApiResponse();
+            r.setData("Service temporarily unavailable");
+            return r;
+        }
     }
 
-    // ======================================
-    // DETECT COIN FROM TEXT
-    // ======================================
-    private String detectCoin(String p){
+    // ==========================================
+    // AI INTENT DETECTION
+    // ==========================================
+    private Map<String,String> understandQuestion(String q){
 
-        p = p.toLowerCase();
+        String prompt = """
+        You are crypto parser.
+        Return ONLY JSON:
 
-        if(p.contains("btc") || p.contains("bitcoin"))
-            return "bitcoin";
+        {
+          "coin": "coin id (like bitcoin, pepe, sui)",
+          "field": "current_price | market_cap | volume | rank | high_24h | low_24h"
+        }
 
-        if(p.contains("eth") || p.contains("ethereum"))
-            return "ethereum";
+        Question: %s
+        """.formatted(q);
 
-        if(p.contains("sol") || p.contains("solana"))
-            return "solana";
+        String ai = callGroq(prompt);
 
-        if(p.contains("doge") || p.contains("dogecoin"))
-            return "dogecoin";
+        return parseJson(ai);
+    }
+    
+    private Map<String,String> parseJson(String ai){
 
-        return "bitcoin";
+        try {
+
+            JSONObject o = new JSONObject(ai);
+
+            Map<String,String> m = new HashMap<>();
+
+            m.put("coin",
+                o.has("coin")
+                  ? o.getString("coin")
+                  : "bitcoin"
+            );
+
+            m.put("field",
+                o.has("field")
+                  ? o.getString("field")
+                  : "current_price"
+            );
+
+            return m;
+
+        } catch(Exception e){
+
+            // 🔥 HARD FALLBACK
+            Map<String,String> m = new HashMap<>();
+            m.put("coin","bitcoin");
+            m.put("field","current_price");
+
+            return m;
+        }
     }
 
-    // ======================================
-    // DETECT WHAT USER WANTS
-    // ======================================
-    private String detectField(String p){
 
-        p = p.toLowerCase();
+    // ==========================================
+    // GROQ CALL
+    // ==========================================
+    private String callGroq(String content){
 
-        if(p.contains("rank"))
-            return "rank";
+        String url =
+        "https://api.groq.com/openai/v1/chat/completions";
 
-        if(p.contains("market cap"))
-            return "market_cap";
+        HttpHeaders h = new HttpHeaders();
+        h.setContentType(MediaType.APPLICATION_JSON);
+        h.setBearerAuth(groqKey);
 
-        if(p.contains("volume"))
-            return "volume";
+        JSONObject body = new JSONObject()
+          .put("model","llama-3.1-8b-instant")
+          .put("messages", new JSONArray().put(
+             new JSONObject()
+               .put("role","user")
+               .put("content",content)
+          ));
 
-        if(p.contains("high"))
-            return "high_24h";
+        String res =
+          rest.postForObject(
+            url,
+            new HttpEntity<>(body.toString(),h),
+            String.class
+          );
 
-        if(p.contains("low"))
-            return "low_24h";
-
-        return "current_price";
+        return new JSONObject(res)
+          .getJSONArray("choices")
+          .getJSONObject(0)
+          .getJSONObject("message")
+          .getString("content");
     }
 
-    // ======================================
-    // FETCH WITH FALLBACK
-    // ======================================
+    // ==========================================
+    // FETCH DATA (ANY COIN)
+    // ==========================================
     private CoinDTO fetchCoin(String coin){
 
         try{
@@ -694,13 +747,14 @@ public class ChatbotServiceImpl implements ChatbotService {
         }
     }
 
-    // ======================================
+    // ==========================================
     // COINGECKO
-    // ======================================
+    // ==========================================
     private CoinDTO fromCoinGecko(String coin){
 
         String url =
-        "https://api.coingecko.com/api/v3/coins/" + coin;
+        "https://api.coingecko.com/api/v3/coins/"
+        + coin.toLowerCase();
 
         Map res = rest.getForObject(url, Map.class);
 
@@ -735,37 +789,36 @@ public class ChatbotServiceImpl implements ChatbotService {
         return d;
     }
 
-    // ======================================
+    // ==========================================
     // CRYPTOCOMPARE FALLBACK
-    // ======================================
+    // ==========================================
     private CoinDTO fromCryptoCompare(String coin){
 
-        String symbol = switch(coin){
-            case "bitcoin" -> "BTC";
-            case "ethereum" -> "ETH";
-            case "solana" -> "SOL";
-            case "dogecoin" -> "DOGE";
-            default -> coin.toUpperCase();
-        };
+        String symbol = coin.toUpperCase();
 
         String url =
         "https://min-api.cryptocompare.com/data/pricemultifull?fsyms="
         + symbol + "&tsyms=USD";
 
-        var headers = new org.springframework.http.HttpHeaders();
-        headers.set("authorization", "Apikey " + cryptoKey);
-
-        var entity =
-        new org.springframework.http.HttpEntity<>(headers);
+        HttpHeaders h = new HttpHeaders();
+        h.set("authorization","Apikey " + cryptoKey);
 
         var response =
-        rest.exchange(url,
-            org.springframework.http.HttpMethod.GET,
-            entity,
-            Map.class);
+        rest.exchange(url, HttpMethod.GET,
+            new HttpEntity<>(h), Map.class);
 
-        Map raw = (Map) response.getBody().get("RAW");
-        Map usd = (Map)((Map)raw.get(symbol)).get("USD");
+        Map body = response.getBody();
+
+        if(body == null || body.get("RAW") == null)
+            return null;
+
+        Map raw = (Map) body.get("RAW");
+
+        if(raw.get(symbol) == null)
+            return null;
+
+        Map usd =
+        (Map)((Map)raw.get(symbol)).get("USD");
 
         CoinDTO d = new CoinDTO();
 
@@ -777,10 +830,25 @@ public class ChatbotServiceImpl implements ChatbotService {
         return d;
     }
 
-    // ======================================
-    // READ VALUE SAFELY
-    // ======================================
-    private Object readValue(CoinDTO d, String f){
+    // ==========================================
+    // HUMAN RESPONSE
+    // ==========================================
+    private String makeHumanResponse(
+        String coin, String field, Object value){
+
+        String p = """
+        Convert to natural sentence:
+
+        Coin: %s
+        Field: %s
+        Value: %s
+        """.formatted(coin, field, value);
+
+        return callGroq(p);
+    }
+
+    // ==========================================
+    private Object readValue(CoinDTO d,String f){
 
         return switch(f){
 
@@ -796,12 +864,18 @@ public class ChatbotServiceImpl implements ChatbotService {
 
             case "low_24h" -> d.getLow24h();
 
-            default -> "unsupported field";
+            default -> d.getCurrentPrice();
         };
     }
 
     private double toDouble(Object v){
-        if(v == null) return 0;
+        if(v==null) return 0;
         return Double.parseDouble(v.toString());
+    }
+
+    private ApiResponse error(String m){
+        ApiResponse r = new ApiResponse();
+        r.setData(m);
+        return r;
     }
 }
