@@ -121,7 +121,18 @@ public class ChatbotServiceImpl implements ChatbotService {
         try {
             String url = "https://api.coingecko.com/api/v3/coins/" + coinId;
 
-            Map res = rest.getForObject(url, Map.class);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-cg-demo-api-key", System.getenv("COINGECKO_API_KEY"));
+
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+            Map res = rest.exchange(
+                    url,
+                    org.springframework.http.HttpMethod.GET,
+                    entity,
+                    Map.class
+            ).getBody();
+
             if (res == null || !res.containsKey("market_data")) return null;
 
             Map market = (Map) res.get("market_data");
@@ -136,7 +147,9 @@ public class ChatbotServiceImpl implements ChatbotService {
 
             return d;
 
-        } catch (RestClientException e) {
+        } catch (Exception e) {
+            System.err.println("CoinGecko API failed for coin: " + coinId);
+            e.printStackTrace();
             return null;
         }
     }
@@ -197,8 +210,11 @@ public class ChatbotServiceImpl implements ChatbotService {
     }
 
     private double toDouble(Object v) {
-        if (v == null) return 0;
-        return Double.parseDouble(v.toString());
+        try {
+            return v == null ? 0 : Double.parseDouble(v.toString());
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private ApiResponse response(String msg) {
