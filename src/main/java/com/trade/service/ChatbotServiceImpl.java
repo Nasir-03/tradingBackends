@@ -1,4 +1,8 @@
 package com.trade.service;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import org.json.JSONArray;
@@ -6,7 +10,6 @@ import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -22,34 +25,28 @@ public class ChatbotServiceImpl implements ChatbotService {
     @Value("${GROQ_API_KEY}")
     private String groqKey;
 
-    @Value("${CRYPTOCOMPARE_KEY}")
-    private String cryptoKey;
-
     // ==========================
     // ENTRY POINT
     // ==========================
     @Override
     public ApiResponse ask(String question) {
 
-        try {            
+        try {
             ParsedQuery pq = parseQuestion(question);
 
-            if (pq.coin == null) {
+            if (pq.coinId == null) {
                 return response("Sorry, I couldn’t recognize the coin in your question.");
             }
 
-
-            CoinDTO dto = fetchCoin(pq.coin);
-
+            CoinDTO dto = fetchFromCoinGecko(pq.coinId);
             if (dto == null) {
-                return response("Sorry, I couldn’t find data for " + pq.coin.toUpperCase());
+                return response("Sorry, I couldn’t find data for " + pq.coinId.toUpperCase());
             }
 
             Object value = extractValue(dto, pq.field);
+            String answer = toHumanAnswer(pq.coinId, pq.field, value);
 
-            String humanAnswer = toHumanAnswer(pq.coin, pq.field, value);
-
-            return response(humanAnswer);
+            return response(answer);
 
         } catch (Exception e) {
             return response("Service temporarily unavailable. Please try again.");
@@ -57,25 +54,21 @@ public class ChatbotServiceImpl implements ChatbotService {
     }
 
     // ==========================
-    // QUESTION PARSER (NO AI)
+    // QUESTION PARSER
     // ==========================
-    
     private ParsedQuery parseQuestion(String q) {
 
         String p = q.toLowerCase().replaceAll("[^a-z0-9 ]", " ").trim();
 
-        String coin = null;
-
-        // Prefer "of <coin>"
+        String coinInput;
         if (p.contains(" of ")) {
-            coin = p.substring(p.lastIndexOf(" of ") + 4).trim().split(" ")[0];
+            coinInput = p.substring(p.lastIndexOf(" of ") + 4).trim().split(" ")[0];
         } else {
-            // fallback: last word
             String[] parts = p.split("\\s+");
-            coin = parts[parts.length - 1];
+            coinInput = parts[parts.length - 1];
         }
 
-        coin = resolveCoinGeckoId(normalizeCoin(coin));
+        String coinId = resolveCoinId(coinInput);
 
         String field = "current_price";
         if (p.contains("market cap") || p.contains("marketcap")) field = "market_cap";
@@ -84,42 +77,58 @@ public class ChatbotServiceImpl implements ChatbotService {
         else if (p.contains("high")) field = "high_24h";
         else if (p.contains("low")) field = "low_24h";
 
-        return new ParsedQuery(coin, field);
+        return new ParsedQuery(coinId, field);
     }
 
-    
+    // ==========================
+    // COIN ID RESOLUTION (SAFE)
+    // ==========================
+    private String resolveCoinId(String input) {
 
-    private String normalizeCoin(String coin) {
+        if (input == null || input.isBlank()) return null;
 
-        if (coin == null) return null;
+        // 🔒 Hard-map major coins (NEVER SEARCH)
+        switch (input.toLowerCase()) {
+            case "btc":
+            case "bitcoin": return "bitcoin";
+            case "eth":
+            case "ethereum": return "ethereum";
+            case "bnb": return "binancecoin";
+            case "xmr":
+            case "monero": return "monero";
+            case "sol":
+            case "solana": return "solana";
+            case "doge":
+            case "dogecoin": return "dogecoin";
+        }
 
-        return switch (coin.toLowerCase()) {
-            case "btc", "bitcoin" -> "bitcoin";
-            case "eth", "ethereum" -> "ethereum";
-            case "sol", "solana" -> "solana";
-            case "doge", "dogecoin" -> "dogecoin";
-            case "ena", "ethena" -> "ethena";
-            case "tao", "bittensor" -> "bittensor";
-//            default -> null; // ❗ VERY IMPORTANT
-            default -> coin.toLowerCase();
-        };
-    }
-
-    private String resolveCoinGeckoId(String input) {
-
+        // 🔍 CoinGecko search for everything else
         try {
-            // 1. Call CoinGecko search API
-            String url = "https://api.coingecko.com/api/v3/search?query=" + input;
+            String url =
+                "https://api.coingecko.com/api/v3/search?query=" +
+                URLEncoder.encode(input, StandardCharsets.UTF_8);
 
             Map res = rest.getForObject(url, Map.class);
-
             if (res == null || res.get("coins") == null) return null;
 
-            var coins = (java.util.List<Map>) res.get("coins");
-
+            List<Map> coins = (List<Map>) res.get("coins");
             if (coins.isEmpty()) return null;
 
-            // 2. Pick the TOP result
+            // 1️⃣ Exact symbol match
+            for (Map c : coins) {
+                if (input.equalsIgnoreCase(c.get("symbol").toString())) {
+                    return c.get("id").toString();
+                }
+            }
+
+            // 2️⃣ Exact name match
+            for (Map c : coins) {
+                if (input.equalsIgnoreCase(c.get("name").toString())) {
+                    return c.get("id").toString();
+                }
+            }
+
+            // 3️⃣ CoinGecko relevance (first result)
             return coins.get(0).get("id").toString();
 
         } catch (Exception e) {
@@ -127,45 +136,15 @@ public class ChatbotServiceImpl implements ChatbotService {
         }
     }
 
-
     // ==========================
-    // FETCH DATA
+    // COINGECKO FETCH (SOURCE OF TRUTH)
     // ==========================
-    private CoinDTO fetchCoin(String coin) {
+    private CoinDTO fetchFromCoinGecko(String coinId) {
 
-        if (coin == null) return null;
-
-        try {
-            return fromCoinGecko(coin);
-        } catch (Exception e) {
-
-            // ❗ Only fallback for major coins
-            if (coin.equals("bitcoin")
-             || coin.equals("ethereum")
-             || coin.equals("solana")
-             || coin.equals("dogecoin")) {
-
-                return fromCryptoCompare(coin);
-            }
-
-            return null; // do NOT guess
-        }
-    }
-
-
-
-    // ==========================
-    // COINGECKO
-    // ==========================
-    private CoinDTO fromCoinGecko(String coin) {
-
-        String url = "https://api.coingecko.com/api/v3/coins/" + coin;
+        String url = "https://api.coingecko.com/api/v3/coins/" + coinId;
 
         Map res = rest.getForObject(url, Map.class);
-
-        if (res == null || !res.containsKey("market_data")) {
-            throw new RuntimeException("Invalid CoinGecko response");
-        }
+        if (res == null || !res.containsKey("market_data")) return null;
 
         Map market = (Map) res.get("market_data");
 
@@ -180,57 +159,29 @@ public class ChatbotServiceImpl implements ChatbotService {
         return d;
     }
 
-
     // ==========================
-    // CRYPTOCOMPARE FALLBACK
-    // ==========================
-    private CoinDTO fromCryptoCompare(String coin) {
-
-        String symbol = toSymbol(coin);
-
-        String url =
-            "https://min-api.cryptocompare.com/data/pricemultifull?fsyms="
-            + symbol + "&tsyms=USD";
-
-        HttpHeaders h = new HttpHeaders();
-        h.set("authorization", "Apikey " + cryptoKey);
-
-        var response =
-            rest.exchange(url, HttpMethod.GET, new HttpEntity<>(h), Map.class);
-
-        Map body = response.getBody();
-        if (body == null || body.get("RAW") == null) return null;
-
-        Map raw = (Map) body.get("RAW");
-        Map usd = (Map) ((Map) raw.get(symbol)).get("USD");
-
-        CoinDTO d = new CoinDTO();
-        d.setCurrentPrice(toDouble(usd.get("PRICE")));
-        d.setMarketCap(toDouble(usd.get("MKTCAP")));
-        d.setTotalVolume(toDouble(usd.get("VOLUME24HOUR")));
-        d.setMarketCapRank(toDouble(usd.get("MKTCAP_RANK")));
-
-        return d;
-    }
-
-    // ==========================
-    // HUMAN RESPONSE (AI)
+    // HUMAN RESPONSE (SAFE AI)
     // ==========================
     private String toHumanAnswer(String coin, String field, Object value) {
 
+        String factual =
+            "The " + field.replace("_", " ") +
+            " of " + coin.toUpperCase() +
+            " is " + value;
+
         try {
-            return callGroq("""
-            Convert this into a natural one-line answer:
+            String ai = callGroq("""
+            Rewrite this fact in ONE short sentence.
+            Do NOT add assumptions, dates, or opinions.
 
-            Coin: %s
-            Field: %s
-            Value: %s
-            """.formatted(coin, field, value));
+            %s
+            """.formatted(factual));
+
+            if (ai == null || ai.isBlank()) return factual;
+            return ai;
+
         } catch (Exception e) {
-        	return "The " + field.replace("_", " ")
-            + " of " + coin.toUpperCase()
-            + " is " + value;
-
+            return factual;
         }
     }
 
@@ -264,7 +215,6 @@ public class ChatbotServiceImpl implements ChatbotService {
             .getString("content");
     }
 
-
     // ==========================
     // HELPERS
     // ==========================
@@ -277,16 +227,6 @@ public class ChatbotServiceImpl implements ChatbotService {
             case "high_24h" -> d.getHigh24h();
             case "low_24h" -> d.getLow24h();
             default -> d.getCurrentPrice();
-        };
-    }
-
-    private String toSymbol(String coin) {
-        return switch (coin) {
-            case "bitcoin" -> "BTC";
-            case "ethereum" -> "ETH";
-            case "solana" -> "SOL";
-            case "dogecoin" -> "DOGE";
-            default -> coin.toUpperCase();
         };
     }
 
@@ -305,10 +245,10 @@ public class ChatbotServiceImpl implements ChatbotService {
     // INTERNAL CLASS
     // ==========================
     private static class ParsedQuery {
-        String coin;
+        String coinId;
         String field;
         ParsedQuery(String c, String f) {
-            this.coin = c;
+            this.coinId = c;
             this.field = f;
         }
     }
