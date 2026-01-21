@@ -59,21 +59,23 @@ public class ChatbotServiceImpl implements ChatbotService {
     // ==========================
     // QUESTION PARSER (NO AI)
     // ==========================
+    
     private ParsedQuery parseQuestion(String q) {
 
         String p = q.toLowerCase().replaceAll("[^a-z0-9 ]", " ").trim();
 
-        // extract coin as a single word
         String coin = null;
-        String[] words = p.split("\\s+");
 
-        for (String w : words) {
-            String normalized = normalizeCoin(w);
-            if (normalized != null) {
-                coin = normalized;
-                break;
-            }
+        // Prefer "of <coin>"
+        if (p.contains(" of ")) {
+            coin = p.substring(p.lastIndexOf(" of ") + 4).trim().split(" ")[0];
+        } else {
+            // fallback: last word
+            String[] parts = p.split("\\s+");
+            coin = parts[parts.length - 1];
         }
+
+        coin = resolveCoinGeckoId(normalizeCoin(coin));
 
         String field = "current_price";
         if (p.contains("market cap") || p.contains("marketcap")) field = "market_cap";
@@ -84,6 +86,8 @@ public class ChatbotServiceImpl implements ChatbotService {
 
         return new ParsedQuery(coin, field);
     }
+
+    
 
     private String normalizeCoin(String coin) {
 
@@ -96,8 +100,31 @@ public class ChatbotServiceImpl implements ChatbotService {
             case "doge", "dogecoin" -> "dogecoin";
             case "ena", "ethena" -> "ethena";
             case "tao", "bittensor" -> "bittensor";
-            default -> null; // ❗ VERY IMPORTANT
+//            default -> null; // ❗ VERY IMPORTANT
+            default -> coin.toLowerCase();
         };
+    }
+
+    private String resolveCoinGeckoId(String input) {
+
+        try {
+            // 1. Call CoinGecko search API
+            String url = "https://api.coingecko.com/api/v3/search?query=" + input;
+
+            Map res = rest.getForObject(url, Map.class);
+
+            if (res == null || res.get("coins") == null) return null;
+
+            var coins = (java.util.List<Map>) res.get("coins");
+
+            if (coins.isEmpty()) return null;
+
+            // 2. Pick the TOP result
+            return coins.get(0).get("id").toString();
+
+        } catch (Exception e) {
+            return null;
+        }
     }
 
 
